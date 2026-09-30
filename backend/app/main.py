@@ -1,7 +1,6 @@
 import os                                                                               # Для работы с путями папок
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles                                             # Модуль для раздачи статики
 from app.api.v1.api import api_router
 
 app = FastAPI(
@@ -22,11 +21,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# ПОДКЛЮЧАЕМ РАЗДАЧУ СТАТИКИ: Связываем URL-путь /static с реальной папкой static на диске
-UPLOAD_DIR = "static"
-os.makedirs(UPLOAD_DIR, exist_ok=True)                                                  # Защита: создаем папку, если стерлась
-app.mount("/static", StaticFiles(directory=UPLOAD_DIR), name="static")                  # Теперь картинки открываются по ссылкам
 
 app.include_router(api_router, prefix="/api/v1")
 
