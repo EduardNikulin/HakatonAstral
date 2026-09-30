@@ -1,33 +1,39 @@
-from typing import AsyncGenerator
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+"""Блок: подключение к БД и управление сессиями (async SQLAlchemy 2.0).
+
+Здесь создаются engine (пул соединений) и sessionmaker. Ручки/сервисы получают
+сессию через зависимость get_db() — сами никогда не открывают соединения.
+Для тестов есть патч-точка: можно подменить get_db на SQLite-версию.
+"""
+from collections.abc import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 from app.core.config import settings
 
-# 1. Создаем асинхронный движок (Engine)
-# Он берет нашу строку DATABASE_URL из настроек (которая начинается с postgresql+asyncpg://)
-async_engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=False,  # SQL-лог можно включить на время отладки
-    future=True
-)
+# Engine: одно «ядро» на приложение. echo=False — не логируем каждый SQL (для дебага
+# можно включить). pool_pre_ping проверит живость соединения перед выдачей.
+engine = create_async_engine(settings.DATABASE_URL, echo=False, pool_pre_ping=True)
 
-# 2. Создаем фабрику сессий (Session Maker)
-# Мы отключаем автокоммит и автофлеш, и говорим, что сессии должны быть строго AsyncSession
-async_session_maker = sessionmaker(
-    async_engine,
+# Фабрика сессий: expire_on_commit=False — объекты остаются читаемыми после commit
+# (иначе доступ к полям после коммита снова дёргал бы базу).
+AsyncSessionLocal = async_sessionmaker(
+    bind=engine,
     class_=AsyncSession,
-    expire_on_commit=False
+    autoflush=False,
+    expire_on_commit=False,
 )
 
-# 3. Асинхронный генератор для получения сессии базы данных (Dependency)
-# Эту функцию мы будем внедрять (Inject) в наши роуты FastAPI, чтобы давать им доступ к БД
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    async with async_session_maker() as session:
+    """FastAPI-зависимость: выдаёт сессию на один запрос, гарантирует закрытие.
+
+    yield отдаёт сессию внутрь ручки; блок finally выполнится уже ПОСЛЕ ответа —
+    там мы коммитим/откатываем транзакцию и закрываем соединение.
+    """
+    async with AsyncSessionLocal() as session:
         try:
-            yield session
-            await session.commit()  # Если всё прошло успешно, сохраняем изменения автоматически
+            yield session          # ручка работает внутри открытой транзакции
+            await session.commit() # всё прошло — фиксируем изменения
         except Exception:
-            await session.rollback()  # Если в процессе роута произошла ошибка, откатываем всё назад
-            raise
-        finally:
-            await session.close()  # В любом случае закрываем соединение, чтобы не забивать пул
+            await session.rollback()  # ошибка в середине запроса — откатываем
+            raise                    # пробрасываем дальше, FastAPI отдаст 500/ошибку

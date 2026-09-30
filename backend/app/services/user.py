@@ -1,73 +1,137 @@
-# Сервисный слой — бизнес-логика пользователей без FastAPI и HTTP.
-# Ручки тонкие: валидация через схемы -> вызов сервиса -> отдача ответа.
-# Новая логика (например, «смена пароля», «бан пользователя») добавляется сюда.
+"""Блок: UserService — бизнес-правила работы с пользователями.
+
+Здесь живут ВСЕ правила («нельзя дубликат логина», «админ не может удалить себя»...).
+Слой не знает про HTTP: вместо ошибок FastAPI бросает исключения из core/exceptions.py,
+а к БД обращается ТОЛЬКО через репозиторий. Ручки становятся тонкими перешлюшками.
+Новые фичи хакатона (правила рейтинга, модерация и т.п.) добавляем в этот слой.
+"""
 import uuid
 
-from app.core.exceptions import UsernameAlreadyExistsError, UserNotFoundError
-from app.core.security import hash_password
+from app.core.exceptions import AlreadyExistsError, InvalidCredentialsError, NotFoundError, PermissionDeniedError
+from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User, UserRoleEnum
 from app.repositories.user import UserRepository
-from app.schemas.user import UserCreate, UserRoleUpdate, UserUpdate
+from app.schemas.user import Token, UserCreate, UserPage, UserResponse, UserUpdate
 
 
 class UserService:
+    """Сервис пользователей. Зависимости (репозиторий) внедряет deps.py."""
+
     def __init__(self, repo: UserRepository):
         self.repo = repo
 
-    # ---------- Чтение ----------
-    async def get_user(self, user_id: uuid.UUID) -> User:
-        """Всегда бросает 404, если пользователя нет — ручкам не нужно это проверять."""
+    # ---------- Регистрация / вход -------------------------------------------
+
+    async def register(self, data: UserCreate) -> tuple[User, Token]:
+        """Создаёт пользователя с ролью player и сразу выдаёт JWT.
+
+        Raises:
+            AlreadyExistsError (409): логин уже занят.
+        """
+        if await self.repo.get_by_username(data.username):   # проверяем уникальность ДО вставки
+            raise AlreadyExistsError("Логин", data.username)
+        user = User(
+            username=data.username,
+            password_hash=hash_password(data.password),      # открытый пароль не сохраняется
+            role=UserRoleEnum.PLAYER,                        # новая регистрация — всегда игрок;
+                                                             # повышение роли возможно только админом
+        )
+        user = await self.repo.create(user)
+        return user, self._make_token(user)
+
+    async def authenticate(self, username: str, password: str) -> Token:
+        """Проверяет логин/пароль и возвращает токен для /auth/login.
+
+        Raises:
+            InvalidCredentialsError (401): юзера нет ИЛИ пароль не совпал
+            (сообщение одинаковое — чтобы нельзя было «сканировать» существующие логины).
+        """
+        user = await self.repo.get_by_username(username)
+        if user is None or not verify_password(password, user.password_hash):
+            raise InvalidCredentialsError()
+        return self._make_token(user)
+
+    @staticmethod
+    def _make_token(user: User) -> Token:
+        """Собирает JWT: sub=id пользователя, плюс роль — для быстрых проверок на клиенте."""
+        access = create_access_token(user.id, {"role": user.role.value})
+        return Token(access_token=access)
+
+    # ---------- Чтение ----------------------------------------------------------
+
+    async def get_or_404(self, user_id: uuid.UUID) -> User:
+        """Универсальная «взять или упасть с 404» — используется остальными методами."""
         user = await self.repo.get_by_id(user_id)
         if user is None:
-            raise UserNotFoundError(str(user_id))
+            raise NotFoundError("Пользователь", user_id)
         return user
 
-    async def list_users(self, role: UserRoleEnum | None, offset: int, limit: int) -> tuple[list[User], int]:
-        users = await self.repo.list_all(role=role, offset=offset, limit=limit)
-        total = await self.repo.count(role=role)
-        return list(users), total
+    async def list_users(self, page: int, per_page: int, role: UserRoleEnum | None) -> UserPage:
+        """Страница пользователей для админки: page=1..N, фильтр по роли опционален."""
+        users, total = await self.repo.list_users(offset=(page - 1) * per_page, limit=per_page, role=role)
+        return UserPage(items=[UserResponse.model_validate(u) for u in users], total=total)
 
-    # ---------- Создание ----------
-    async def register(self, data: UserCreate) -> User:
-        """Регистрация нового пользователя. Роль всегда player (админа назначает только админ)."""
-        existing = await self.repo.get_by_username(data.username)
-        if existing is not None:
-            raise UsernameAlreadyExistsError()
-        return await self.repo.create(
-            username=data.username,
-            password_hash=hash_password(data.password),
-            role=UserRoleEnum.PLAYER,
-        )
+    # ---------- Изменение -------------------------------------------------------
 
-    async def ensure_admin_exists(self, username: str, password: str) -> bool:
-        """Создаёт администратора, если его ещё нет. Возвращает True, если создал."""
-        existing = await self.repo.get_by_username(username)
-        if existing is not None:
-            return False
-        await self.repo.create(
-            username=username,
-            password_hash=hash_password(password),
-            role=UserRoleEnum.ADMIN,
-        )
-        return True
+    async def update_self(self, current: User, data: UserUpdate) -> User:
+        """PATCH /users/me: пользователь меняет СВОИ username/пароль.
 
-    # ---------- Обновление ----------
-    async def update_profile(self, user: User, data: UserUpdate) -> User:
-        """Редактирование своего профиля пользователем (роль менять нельзя)."""
-        updates = data.model_dump(exclude_unset=True)
-        if "username" in updates and updates["username"] != user.username:
-            taken = await self.repo.get_by_username(updates["username"])
-            if taken is not None:
-                raise UsernameAlreadyExistsError()
-        return await self.repo.update(user, **updates)
+        Raises:
+            AlreadyExistsError: новый логин занят кем-то другим.
+        """
+        if data.username and data.username != current.username:
+            if await self.repo.get_by_username(data.username):
+                raise AlreadyExistsError("Логин", data.username)
+            current.username = data.username
+        if data.password:                     # пароль меняем только если прислали новый
+            current.password_hash = hash_password(data.password)
+        return await self.repo.update(current)
 
-    async def change_role(self, target: User, data: UserRoleUpdate, actor: User) -> User:
-        """Назначение роли. Вызывается только от имени админа (проверка прав — в deps/route)."""
-        if target.id == actor.id and data.role != UserRoleEnum.ADMIN:
-            # защита: админ не может сам себя понизить и потерять доступ к управлению
-            raise ValueError("Админ не может снять с себя роль администратора")
-        return await self.repo.update(target, role=data.role)
+    async def change_role(self, actor: User, target_id: uuid.UUID, new_role: UserRoleEnum) -> User:
+        """Назначение роли (ручка доступна только админу — проверка в deps).
 
-    # ---------- Удаление ----------
-    async def delete_user(self, user: User) -> None:
-        await self.repo.delete(user)
+        Правило безопасности: админ не может сам себя понизить — иначе можно
+        случайно остаться без единого администратора системы.
+        """
+        if actor.id == target_id and new_role != UserRoleEnum.ADMIN:
+            raise PermissionDeniedError("Админ не может снять роль с самого себя")
+        target = await self.get_or_404(target_id)
+        target.role = new_role
+        return await self.repo.update(target)
+
+    # ---------- Удаление --------------------------------------------------------
+
+    async def delete_user(self, actor: User, target_id: uuid.UUID) -> None:
+        """Удаление пользователя админом (или игроком себя через /users/me).
+
+        Args:
+            actor: кто инициирует удаление (текущий юзер из токена).
+            target_id: кого удаляем.
+
+        Raises:
+            PermissionDeniedError: админа нельзя удалить совсем (нужен живой админ);
+                                   самоснятие доступно через другой путь — см. change_role.
+            NotFoundError: target_id не существует.
+        """
+        if actor.id == target_id and actor.role == UserRoleEnum.ADMIN:
+            raise PermissionDeniedError("Админ не может удалить сам себя")
+        target = await self.get_or_404(target_id)
+        if target.role == UserRoleEnum.ADMIN:
+            raise PermissionDeniedError("Нельзя удалить администратора")
+        await self.repo.delete(target)
+
+    async def ensure_admin_exists(self) -> None:
+        """Вызывается lifespan-ом при старте: создаёт админа из .env, если его ещё нет.
+
+        Идемпотентна: повторные запуски ничего не ломают.
+        """
+        from app.core.config import settings  # локальный импорт, чтобы не тянуть настройки в модуль
+
+        if not await self.repo.get_by_username(settings.ADMIN_USERNAME):
+            await self.repo.create(
+                User(
+                    username=settings.ADMIN_USERNAME,
+                    password_hash=hash_password(settings.ADMIN_PASSWORD),
+                    role=UserRoleEnum.ADMIN,
+                )
+            )

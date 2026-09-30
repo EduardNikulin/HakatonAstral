@@ -1,5 +1,13 @@
-# Точка входа FastAPI. Здесь: настройка приложения, CORS, жизненный цикл (startup/shutdown).
-import logging
+"""Блок: точка входа приложения — сборка FastAPI, CORS, lifespan.
+
+Запуск для разработки:  uvicorn app.main:app --reload  (из папки backend/)
+Swagger с интерактивными ручками: http://localhost:8000/docs
+
+Порядок «что происходит при старте»:
+1) создаётся приложение (ниже, create_app) -> 2) lifespan открывает БД и
+гарантирует наличие админа -> 3) запросы идут через middleware(CORS) -> api_router.
+"""
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,57 +15,66 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.api import api_router
 from app.core.config import settings
-from app.database.session import async_session_maker
+from app.database.session import AsyncSessionLocal
 from app.repositories.user import UserRepository
 from app.services.user import UserService
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("realgame")
-
-
-async def bootstrap_admin() -> None:
-    """При старте гарантируем, что в БД есть администратор (ADMIN_USERNAME/ADMIN_PASSWORD из .env)."""
-    async with async_session_maker() as session:
-        service = UserService(UserRepository(session))
-        created = await service.ensure_admin_exists(settings.ADMIN_USERNAME, settings.ADMIN_PASSWORD)
-        await session.commit()
-        if created:
-            logger.info(f"Создан администратор по умолчанию: {settings.ADMIN_USERNAME}")
-
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Код до startup — инициализация; после yield — shutdown.
-    try:
-        await bootstrap_admin()
-    except Exception as e:  # не роняем старт, если БД ещё недоступна (например, до первой миграции)
-        logger.warning(f"Не удалось создать администратора по умолчанию: {e}")
-    yield
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Код «до старта» и «после остановки» приложения.
+
+    До старта: проверяем доступность БД и создаём админа по умолчанию из .env
+    (идемпотентно — если админ уже есть, ничего не произойдёт).
+    После остановки: сейчас чистить нечего (соединения закрывает engine сам),
+    сюда добавляем освобождение будущих ресурсов (redis, mq и т.п.).
+    """
+    async with AsyncSessionLocal() as session:          # служебная сессия вне HTTP-запросов
+        service = UserService(UserRepository(session))  # цепочку собираем вручную, без Depends
+        await service.ensure_admin_exists()             # <- админ из ADMIN_USERNAME/ADMIN_PASSWORD
+        await session.commit()                          # фиксируем вставку админа
+    yield                                               # всё время работы приложения — «тут»
 
 
-app = FastAPI(
-    title="RealGame API",
-    description="Бэкенд для игрового проекта RealGame",
-    version="1.0.0",
-    lifespan=lifespan,
-)
+def create_app() -> FastAPI:
+    """Фабрика приложения: здесь настраиваем метаданные, CORS и подключаем API.
 
-origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
+    Вынесено в функцию, чтобы тесты могли создавать изолированные экземпляры app.
+    """
+    app = FastAPI(
+        title="RealGame API",                  # имя в Swagger UI
+        version="1.0.0",
+        description=(
+            "Backend шаблона для хакатона: авторизация (JWT), роли admin/author/player, "
+            "CRUD пользователей. Точки расширения: services/ (логика), repositories/ (SQL), "
+            "api/v1/api.py (новые роутеры)."
+        ),
+        lifespan=lifespan,
+        docs_url="/docs",                      # Swagger UI
+        redoc_url="/redoc",                    # альтернативная документация
+    )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    # CORS: браузер блокирует запросы фронт(5173)->бек(8000) без этого разрешения.
+    # origins берём из настроек (.env), методы — стандартные для REST.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ORIGINS,
+        allow_credentials=True,   # разрешить cookies/auth-заголовки
+        allow_methods=["*"],      # GET/POST/PATCH/DELETE...
+        allow_headers=["*"],      # Authorization и любые кастомные
+    )
 
-app.include_router(api_router, prefix="/api/v1")
+    # Единая префикс-точка версионирования: все ручки живут под /api/v1.
+    app.include_router(api_router, prefix="/api/v1")
+
+    # Служебный эндпоинт для мониторинга/проверки, что бэк вообще жив.
+    @app.get("/healthcheck", tags=["Сервис"], summary="Жив ли бэкенд")
+    async def healthcheck() -> dict[str, str]:
+        """Возвращает {"status": "ok"} — удобно CI/деплою и быстрой проверке в браузере."""
+        return {"status": "ok", "database": "configured"}
+
+    return app
 
 
-@app.get("/")
-async def read_root():
-    return {"status": "working", "message": "Welcome to RealGame API!"}
+# Экземпляр для `uvicorn app.main:app` (имя `app` — соглашение uvicorn).
+app = create_app()

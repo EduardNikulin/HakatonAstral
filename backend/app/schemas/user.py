@@ -1,9 +1,10 @@
-# Pydantic-схемы пользователей. Слои схем:
-#   UserBase      — общие поля (добавляй новые поля сюда)
-#   UserCreate    — входные данные регистрации
-#   UserUpdate    — входные данные редактирования профиля (все поля опциональны)
-#   UserResponse  — то, что отдаём фронтенду (пароль никогда не возвращаем!)
-#   UserPage      — пагинация списка пользователей для админки
+"""Блок: Pydantic-схемы пользователя — контракты «вход/выход» API.
+
+Модели SQLAlchemy описывают, КАК данные лежат в БД; схемы здесь описывают,
+КАКИЕ поля принимает и отдаёт HTTP-API. Разделение позволяет, например,
+принять пароль (UserCreate) и никогда его не отдать (UserResponse).
+Новые поля сущности = добавить в модель + сюда (+ Alembic-миграция).
+"""
 import uuid
 from datetime import datetime
 
@@ -13,46 +14,54 @@ from app.models.user import UserRoleEnum
 
 
 class UserBase(BaseModel):
-    username: str = Field(..., min_length=3, max_length=50, description="Уникальное имя пользователя")
+    """Общие поля всех пользовательских схем (наследуемся от неё ниже)."""
+
+    # min_length/max_length и pattern — валидация на лету: кривой логин не дойдёт до БД.
+    username: str = Field(
+        min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_.-]+$",
+        description="Логин: буквы, цифры, _ . -",
+    )
 
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=6, max_length=100, description="Пароль в открытом виде")
+    """Тело запроса регистрации: логин + пароль (пароль принимаем, но не отдаём)."""
+
+    password: str = Field(min_length=6, max_length=128, description="Минимум 6 символов")
 
 
-class UserLogin(BaseModel):
-    """Вариант входа через JSON (альтернатива OAuth2 form-data)."""
-    username: str = Field(..., description="Имя пользователя")
-    password: str = Field(..., description="Пароль")
+class UserUpdate(UserBase):
+    """Тело PATCH /users/me: всё опционально — обновляем только присланные поля."""
 
-
-class UserUpdate(BaseModel):
-    """Редактирование своего профиля. Только безопасные поля — роль здесь отсутствует."""
-    username: str | None = Field(None, min_length=3, max_length=50)
+    username: str | None = Field(default=None, min_length=3, max_length=50)
+    password: str | None = Field(default=None, min_length=6, max_length=128)
 
 
 class UserRoleUpdate(BaseModel):
-    """Назначается ТОЛЬКО админом через PATCH /users/{id}/role."""
-    role: UserRoleEnum = Field(..., description="Новая роль: admin / author / player")
+    """Админский PATCH /users/{id}/role: одна роль из enum. Валидируется автоматически."""
+
+    role: UserRoleEnum
 
 
 class UserResponse(UserBase):
-    id: uuid.UUID = Field(..., description="Уникальный ID пользователя")
-    role: UserRoleEnum = Field(..., description="Роль пользователя в системе")
-    created_at: datetime = Field(..., description="Дата регистрации")
+    """Что фронт видит про пользователя. Поля password_hash тут НЕТ намеренно."""
 
-    # Позволяет Pydantic v2 читать данные из SQLAlchemy-моделей напрямую.
+    # from_attributes=True: можно делать UserResponse.model_validate(user_orm_obj).
     model_config = ConfigDict(from_attributes=True)
 
-
-class UserPage(BaseModel):
-    """Страница списка пользователей (для админки)."""
-    items: list[UserResponse]
-    total: int
-    offset: int
-    limit: int
+    id: uuid.UUID
+    role: UserRoleEnum
+    created_at: datetime
 
 
 class Token(BaseModel):
-    access_token: str = Field(..., description="JWT-токен доступа")
-    token_type: str = Field("bearer", description="Тип токена (всегда bearer)")
+    """Ответ логина/регистрации: JWT + тип заголовка для клиента (Bearer <token>)."""
+
+    access_token: str
+    token_type: str = "bearer"
+
+
+class UserPage(BaseModel):
+    """Страница списка пользователей для админки (пагинация)."""
+
+    items: list[UserResponse]   # юзеры текущей страницы
+    total: int                  # всего записей без учёта фильтра/страницы
