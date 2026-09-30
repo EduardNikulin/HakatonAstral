@@ -5,15 +5,15 @@ import { useAuth } from '../context/AuthContext' // текущий пользо�
 export default function HomePage() {
   const { user } = useAuth()                 // достаём профиль из общей коробки
   return (
-    <main className="page page-home">        // та же центрирующая колонка (+класс для главной)
+    <main className="page page-home">        
       {user ? (                              // залогинен: встречаем по имени
         <p className="welcome">
-          Это HakatonAstral. Добро пожаловать, {user.display_name || user.username}!
+          Это заглушка проекта HakatonAstral. Добро пожаловать, уважаемый {user.display_name || user.username}!
           {/* display_name заполняется в профиле; пока null — показываем username (оператор || = «или») */}
         </p>
       ) : (                                  // гость: минимальная заглушка на пустом листе
         <p className="welcome welcome-guest">
-          Здесь будет игра. <br />
+          Привет, малоуважаемый гость. <br />
           Войдите или зарегистрируйтесь, чтобы начать.
           {/* две кнопки уже висят в правом верхнем углу (Header) — здесь их дублировать не нужно */}
         </p>

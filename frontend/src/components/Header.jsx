@@ -35,7 +35,7 @@ export default function Header() {
           <>
             {/* display_name может быть null (заполняется позже в профиле),
                 поэтому запасной вариант — username. Оператор || читается «или». */}
-            <span className="username">Привет, {user.display_name || user.username}</span>
+            <span className="username">{user.display_name || user.username}</span>
             {/* button, а не Link: тут действие (выход), а не переход по адресу */}
             <button type="button" onClick={handleLogout} className="btn btn-outline">Выйти</button>
           </>
