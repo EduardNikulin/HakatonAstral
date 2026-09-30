@@ -7,7 +7,7 @@ from app.core.config import settings
 # Он берет нашу строку DATABASE_URL из настроек (которая начинается с postgresql+asyncpg://)
 async_engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=True,  # Включаем echo=True, чтобы в терминале VS Code красиво писались все SQL-запросы (очень помогает при отладке)
+    echo=False,  # SQL-лог можно включить на время отладки
     future=True
 )
 

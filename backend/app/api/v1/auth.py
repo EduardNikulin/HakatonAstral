@@ -1,101 +1,42 @@
-# Эндпоинты авторизации: регистрация, хеширование паролей bcrypt, выдача JWT токенов.
-import uuid
+# Эндпоинты авторизации: регистрация, вход (JWT), текущий пользователь.
+# Вся логика — в UserService; здесь только HTTP-обёртки.
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+
+from fastapi import APIRouter, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
-from app.core.security import hash_password, verify_password, create_access_token
-from app.database.session import get_db
+from app.api.v1.deps import get_current_user, get_user_service
+from app.core.exceptions import InvalidCredentialsError
+from app.core.security import create_access_token, verify_password
 from app.models.user import User
-from app.schemas.user import UserCreate, UserResponse, Token
-from app.api.v1.deps import get_current_user                              
+from app.schemas.user import Token, UserCreate, UserResponse
+from app.services.user import UserService
 
-
-# Создаем изолированный роутер для авторизации
 router = APIRouter(prefix="/auth", tags=["Auth"])
+
+ACCESS_TOKEN_TTL_MINUTES = 60
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
-    """
-    Регистрация нового пользователя.
-    """
-    # 1. Проверяем, нет ли уже пользователя с таким именем в базе данных
-    query = select(User).where(User.username == user_in.username)
-    result = await db.execute(query)
-    existing_user = result.scalar_one_or_none()
-    
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Пользователь с таким именем уже существует"
-        )
-    
-    # 2. Хэшируем чистый пароль из Pydantic-схемы
-    hashed_pwd = hash_password(user_in.password)
-    
-    # 3. Создаем новый объект модели SQLAlchemy User
-    new_user = User(
-        username=user_in.username,
-        password_hash=hashed_pwd,
-        role="player"  # По умолчанию все регистрируются как обычные игроки
-    )
-    
-    # 4. Сохраняем пользователя в PostgreSQL
-    db.add(new_user)
-    await db.flush()  # Метод flush() заставляет БД сгенерировать UUID для нового юзера
-    
-    return new_user
+async def register(user_in: UserCreate, service: UserService = Depends(get_user_service)):
+    """Регистрация нового пользователя. Роль всегда player — админа назначает только админ."""
+    return await service.register(user_in)
 
 
 @router.post("/login", response_model=Token)
 async def login(
-    form_data: OAuth2PasswordRequestForm = Depends(), 
-    db: AsyncSession = Depends(get_db)
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    service: UserService = Depends(get_user_service),
 ):
-    """
-    Вход в систему (авторизация). При успехе возвращает JWT-токен.
-    Использует OAuth2 стандарт (данные передаются как form-data).
-    """
-    # 1. Ищем пользователя в базе данных по введенному username
-    query = select(User).where(User.username == form_data.username)
-    result = await db.execute(query)
-    user = result.scalar_one_or_none()
-    
-    # 2. Если пользователя нет или пароль не совпал с хэшем — кидаем ошибку 401
+    """Вход (OAuth2 form-data: username + password). Возвращает JWT-токен."""
+    user = await service.repo.get_by_username(form_data.username)
     if not user or not verify_password(form_data.password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверное имя пользователя или пароль",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    # 3. Задаем время жизни токена (например, 60 минут)
-    access_token_expires = timedelta(minutes=60)
-    
-    # 4. Генерируем строку JWT-токена, зашивая внутрь UUID пользователя (sub)
-    access_token = create_access_token(
-        subject=str(user.id), 
-        expires_delta=access_token_expires
-    )
-    
-    # 5. Возвращаем токен согласно нашей Pydantic схеме Token
-    return {"access_token": access_token, "token_type": "bearer"}
+        raise InvalidCredentialsError()
+    token = create_access_token(subject=str(user.id), expires_delta=timedelta(minutes=ACCESS_TOKEN_TTL_MINUTES))
+    return {"access_token": token, "token_type": "bearer"}
 
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
-    """ Возвращает профиль текущего пользователя по JWT-токену для сохранения сессии """
-    return current_user                                                                 # Отдаем объект юзера из токена
-
-
-@router.patch("/role", response_model=UserResponse)
-async def change_role(new_role: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """ Меняет роль пользователя с player на author или наоборот """
-    if new_role not in ["player", "author"]:                                            # Проверяем валидность роли
-        raise HTTPException(status_code=400, detail="Неверная роль")                   # Отсекаем левые строки
-    current_user.role = new_role                                                        # Меняем роль в модели
-    await db.commit()                                                                   # Сохраняем изменения в PostgreSQL
-    return current_user                                                                 # Возвращаем обновленного юзера
+    """Профиль текущего пользователя по JWT — для восстановления сессии на фронте."""
+    return current_user

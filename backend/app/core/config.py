@@ -1,17 +1,22 @@
+# Настройки приложения читаются из .env (см. .env.example).
+# Новая настройка = поле здесь + строка в .env / .env.example.
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
-    # Указываем переменные и их типы данных
     DATABASE_URL: str
     SECRET_KEY: str
-    ALGORITHM: str = "HS256"  # Здесь можно сразу задать значение по умолчанию
+    ALGORITHM: str = "HS256"
 
-    # Настройка Pydantic для чтения .env файла
+    # Администратор по умолчанию (создаётся автоматически при старте приложения)
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: str = "admin123"
+
     model_config = SettingsConfigDict(
-        env_file=".env",           # Имя файла, откуда брать переменные
-        env_file_encoding="utf-8", # Кодировка файла
-        extra="ignore"             # Игнорировать другие переменные в окружении, если они есть
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
     )
 
-# Создаем один экземпляр настроек для использования во всем проекте
+
 settings = Settings()
