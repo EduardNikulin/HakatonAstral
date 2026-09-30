@@ -1,0 +1,83 @@
+/* Блок: глобальные стили приложения. Один файл на всё — для старта этого хватает,
+   при росте проекта разнесём по компонентам. */
+
+* { box-sizing: border-box; }        /* ширина padding не «съедает» размеры блоков */
+
+body {
+  margin: 0;                          /* убрать дефолтные отступы браузера */
+  font-family: system-ui, sans-serif; /* системный шрифт — быстро и нативно */
+  background: #f3f4f6;                /* светло-серый фон страницы */
+  color: #1f2937;                     /* тёмно-серый текст (мягче чистого чёрного) */
+}
+
+/* --- Шапка: тянется на всю ширину, содержимое раздвигается по краям --- */
+.header {
+  display: flex;                      /* включаем флекс-раскладку */
+  justify-content: space-between;     /* логотип влево, правая часть вправо */
+  align-items: center;                /* вертикальное выравнивание по центру */
+  padding: 12px 24px;                 /* воздух вокруг */
+  background: #ffffff;                /* белая полоса */
+  border-bottom: 1px solid #e5e7eb;   /* тонкая линия снизу */
+}
+.brand { font-weight: 700; text-decoration: none; color: inherit; } /* жирно, без подчёркивания ссылки */
+.header-right { display: flex; align-items: center; gap: 12px; }    /* элементы справа в строку с зазором */
+.username { color: #374151; }                                       /* имя пользователя — спокойный серый */
+
+/* --- Кнопки: базовая .btn + два варианта цвета --- */
+.btn {
+  display: inline-block;
+  padding: 8px 16px;
+  border-radius: 8px;                 /* скруглённые углы */
+  border: 1px solid transparent;      /* рамка-заглушка одинаковой толщины у обоих вариантов */
+  font-size: 14px;
+  cursor: pointer;                    /* курсор-рука — сигнал «кликабельно» */
+  text-decoration: none;              /* ссылки-кнопки без подчёркивания */
+  color: #1f2937;
+  background: transparent;
+}
+.btn-outline { border-color: #d1d5db; }                              /* контурная: только рамка */
+.btn-solid   { background: #2563eb; color: #fff; border-color: #2563eb; } /* залитая синим */
+.btn:hover   { opacity: 0.9; }                                       /* лёгкий отклик на наведение */
+
+/* --- Страницы: контент узкой колонкой по центру --- */
+.page { max-width: 480px; margin: 48px auto; padding: 0 16px; }
+.page-home { text-align: center; margin-top: 120px; }                /* пустой лист: приветствие выше центра */
+.welcome { font-size: 18px; color: #374151; }
+.welcome-guest { color: #6b7280; line-height: 1.6; }                 /* гостевая заглушка — бледнее */
+
+/* --- Карточка авторизации/регистрации --- */
+.card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);                            /* едва заметная тень «приподнятости» */
+}
+.card h1 { margin-top: 0; font-size: 22px; }                         /* заголовок формы */
+
+/* --- Поля формы: каждый элемент на своей строке --- */
+form { display: flex; flex-direction: column; }                      /* вертикальный столбик */
+label { margin: 12px 0 4px; font-size: 14px; color: #374151; }       /* подпись над полем */
+input {
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 15px;
+}
+input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.15); } /* подсветка активного поля */
+button[type="submit"] {
+  margin-top: 20px;
+  padding: 11px;
+  border: none;
+  border-radius: 8px;
+  background: #2563eb;                                               /* основная кнопка — синяя залитая */
+  color: #fff;
+  font-size: 15px;
+  cursor: pointer;
+}
+button[type="submit"]:disabled { opacity: 0.6; cursor: default; }    /* во время запроса кнопка «неактивна» */
+
+/* --- Тексты ошибок и подсказок --- */
+.error { color: #dc2626; font-size: 14px; margin: 12px 0 0; }        /* красное сообщение об ошибке */
+.hint { color: #6b7280; font-size: 14px; text-align: center; }       /* серая подсказка со ссылкой */
+.hint a { color: #2563eb; }                                          /* ссылка — синяя */

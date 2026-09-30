@@ -1,38 +1,31 @@
-# Виртуальные окружения Python (абсолютно любые варианты расположения)
+# Виртуальные окружения Python (любое расположение)
 venv/
 .venv/
 env/
 ENV/
-backend/venv/
-backend/.venv/
 
-# Кэш Python компилятора
+# Кэш Python
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
 .pytest_cache/
 .mypy_cache/
 
-# Зависимости и сборка Node.js (Frontend)
-node_modules/
-dist/
-build/
-.next/
-.nuxt/
-
-# Конфигурационные файлы с секретами (пароли, ключи)
+# Локальные секреты: реальный .env НЕ коммитим, .env.example — эталон без паролей — коммитим
 .env
 .env.local
-.env.*.local
-# .env.example — шаблон без секретов, коммитим
-!.env.example
-!backend/.env.example
-!frontend/.env.example
-backend/.env
-frontend/.env
 
-# Файлы настроек редакторов кода и IDE
+# SQLite-файлы от smoke-тестов и локальных прогонов (не база и не код — мусор)
+*.db
+*.sqlite3
+
+# Node.js: зависимости и сборка фронта
+node_modules/
+dist/
+npm-debug.log*
+
+# IDE и ОС
 .idea/
 .vscode/
-*.db
+*.swp
+.DS_Store

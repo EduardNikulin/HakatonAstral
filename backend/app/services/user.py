@@ -83,6 +83,11 @@ class UserService:
             if await self.repo.get_by_username(data.username):
                 raise AlreadyExistsError("Логин", data.username)
             current.username = data.username
+        # display_name: обновляем только если поле реально пришло в PATCH-запросе.
+        # "model_fields_set" — набор полей, которые клиент явно прислал (в отличие
+        # от просто None по умолчанию). Позволяет отличить «не трогать» от «очистить».
+        if "display_name" in data.model_fields_set:
+            current.display_name = data.display_name
         if data.password:                     # пароль меняем только если прислали новый
             current.password_hash = hash_password(data.password)
         return await self.repo.update(current)

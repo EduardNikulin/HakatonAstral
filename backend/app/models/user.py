@@ -36,6 +36,9 @@ class User(Base):
     )
     # Только bcrypt-хэш! Открытый пароль нигде не храним и никому не отдаём.
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Отображаемое имя пользователя (показывается во фронтенде после входа).
+    # Optional: может быть NULL — тогда фронт показывает username.
+    display_name: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
     # Роль как enum в БД: мусорное значение невозможно записать ни из API, ни руками.
     role: Mapped[UserRoleEnum] = mapped_column(
         Enum(UserRoleEnum, name="user_role", values_callable=lambda e: [m.value for m in e]),

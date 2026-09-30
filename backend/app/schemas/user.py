@@ -32,8 +32,11 @@ class UserCreate(UserBase):
 class UserUpdate(UserBase):
     """Тело PATCH /users/me: всё опционально — обновляем только присланные поля."""
 
+    # Переопределяем username из UserBase как optional (PATCH = частичное обновление).
     username: str | None = Field(default=None, min_length=3, max_length=50)
     password: str | None = Field(default=None, min_length=6, max_length=128)
+    # Отображаемое имя (необязательное) — то, что фронт показывает в шапке после входа.
+    display_name: str | None = Field(default=None, max_length=100)
 
 
 class UserRoleUpdate(BaseModel):
@@ -51,6 +54,8 @@ class UserResponse(UserBase):
     id: uuid.UUID
     role: UserRoleEnum
     created_at: datetime
+    # Отображаемое имя (может быть null — фронт тогда показывает username).
+    display_name: str | None = None
 
 
 class Token(BaseModel):
