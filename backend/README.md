@@ -36,15 +36,22 @@ migrations/            # Alembic (async env.py читает DATABASE_URL из .e
 - Назначение ролей — только от имени админа: `PATCH /api/v1/users/{id}/role` (`Depends(require_admin)`).
 - Админ по умолчанию создаётся при старте: `ADMIN_USERNAME` / `ADMIN_PASSWORD` из `.env` (admin/admin123).
 
-## Запуск
-```bash
+## Запуск (Windows PowerShell)
+```powershell
 cd backend
-cp .env.example .env                # затем поменять SECRET_KEY и пароли
-pip install -r requirements.txt
-alembic revision --autogenerate -m "users"   # первая миграция
+python -m venv venv
+venv\Scripts\Activate.ps1           # если запрет: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+Copy-Item .env.example .env         # затем поменять SECRET_KEY и пароли
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+# ВАЖНО: всегда `python -m pip`, а не просто `pip` — иначе возможна ошибка
+# "Fatal error in launcher: Unable to create process" (битый путь в pip.exe,
+# если venv был скопирован с другого места; лечится пересозданием папки venv).
+alembic revision --autogenerate -m "users"   # первая миграция (нужен PostgreSQL из DATABASE_URL)
 alembic upgrade head
-uvicorn app.main:app --reload       # http://localhost:8000/docs
+python -m uvicorn app.main:app --reload      # http://localhost:8000/docs
 ```
+Без PostgreSQL можно сразу проверить всё на SQLite: `python smoke_test.py` (17 проверок).
 
 ## Smoke-тест (без PostgreSQL, на SQLite)
 ```bash
