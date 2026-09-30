@@ -35,3 +35,4 @@ frontend/.env
 # Файлы настроек редакторов кода и IDE
 .idea/
 .vscode/
+*.db
