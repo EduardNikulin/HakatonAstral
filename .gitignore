@@ -25,6 +25,10 @@ build/
 .env
 .env.local
 .env.*.local
+# .env.example — шаблон без секретов, коммитим
+!.env.example
+!backend/.env.example
+!frontend/.env.example
 backend/.env
 frontend/.env
 
